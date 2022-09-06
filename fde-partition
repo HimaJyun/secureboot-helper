@@ -1,0 +1,83 @@
+#!/bin/bash -eu
+SCRIPT="$(basename "$0")"
+
+function print_help () {
+    cat << EOL
+$SCRIPT: automatic automatic patition setup for LUKS without LVM.
+Usage: $0 [OPTIONS...] /dev/<device>
+
+Options:
+  -l, --boot-last: Boot partition is last (for delete after)
+  --yes-yes-destroy-break-yes: without confirm (Danger!!!)
+  -h, --help: Show this help.
+EOL
+}
+
+function log_file() {
+    echo "$1-$(date "+%Y%m%d%H%M%S")"
+}
+
+: "check root" && {
+    if [[ "$(id -u)" -ne 0 ]];then
+        print_help
+        echo ""
+        echo "$SCRIPT: require root."
+        exit 1
+    fi
+}
+
+# parse args
+boot_num=2
+root_num=3
+confirm=true
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -l | -b | --boot-last ) boot_num=3; root_num=2; shift;;
+        --yes-yes-destroy-break-yes ) confirm=false; shift;;
+        -v | --varbose) set +x ; shift;; # 隠し
+        -h | --help) print_help ; exit;;
+        *) break;;
+    esac
+done
+
+: "check argument" && {
+    if [[ $# -le 0 ]];then
+        print_help
+        echo ""
+        echo "device is not specified!"
+        exit 1
+    elif [[ ! -e "$1" ]];then
+        echo "$1 is not exists!"
+        exit 1
+    fi
+}
+
+: "warning" && $confirm && {
+    sgdisk -p "$1"
+    read -p "WARNING: You selected $1, If continue will destroy all data on the disk. Continue? [y/n]" yn
+    if [ "${yn}" != "y" ];then
+        echo "Cancelled!!"
+        exit
+    fi
+}
+
+: "partition" && {
+    bak="$(log_file partition).backup.txt"
+    sgdisk --backup="$bak" "$1"
+    echo "Backup old partition info to $bak. If you need restore, try it:"
+    echo "sgdisk --load-backup=$bak $1"
+    echo ""
+    sgdisk -Z -o \
+    -n 1::+100M: -t 1:EF00 -c 1:EFI \
+    -n "${boot_num}::+1G" -t "${boot_num}:8300" -c "${boot_num}:boot" \
+    -n "${root_num}::" -t "${root_num}:8309" -c "${root_num}:root" \
+    -p "$1"
+}
+
+: "mkfs" && {
+    prefix=""
+    if [[ "$1" == "/dev/nvme"* ]];then
+        prefix="p"
+    fi
+    mkfs.fat -F 32 "${1}${prefix}1"
+}
