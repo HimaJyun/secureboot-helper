@@ -8,12 +8,19 @@ Usage: $0 [OPTIONS...] /dev/<device>
 
 Options:
   -l, --boot-last: Boot partition is last (for delete after)
+  -r, --root-size: root partition size
+  -f, --without-filesystem: without filesystem
+  -n, --luks-name: LUKS mapper name (default: root)
+  -p, --luks-password: LUKS password  (default: enter from stdin. if "random" is generate random password)
+  -k, --luks-keyfile: LUKS key file pass, only use if specified. (if "random" is generate random keyfile)
+  --password-length: random password length (default: 20)
+  --keyfile-length: random keyfile length (default: 2048)
   --yes-yes-destroy-break-yes: without confirm (Danger!!!)
   -h, --help: Show this help.
 EOL
 }
 
-function log_file() {
+function date_file() {
     echo "$1-$(date "+%Y%m%d%H%M%S")"
 }
 
@@ -29,13 +36,30 @@ function log_file() {
 # parse args
 boot_num=2
 root_num=3
+boot_position=":+1G"
+root_size=""
+no_fs=false
+luks_name="root"
+luks_pass=""
+luks_pass_len="20"
+luks_key=""
+luks_key_len="2048"
+backup=true
 confirm=true
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -l | -b | --boot-last ) boot_num=3; root_num=2; shift;;
+        -l | -b | --boot-last ) boot_num=3; root_num=2; boot_position="-1G:"; shift;;
+        -r | --root-size ) root_size="$2"; shift; shift;;
+        -f | -w | --without-filesystem | --without-fs ) no_fs=true; shift;;
+        -n | --luks-name | --name ) luks_name="$2"; shift; shift;;
+        -p | --luks-pass | --pass ) luks_pass="$2"; shift; shift;;
+        -k | --luks-key | --luks-file | --luks-keyfile | --keyfile | --file) luks_key="$2"; shift; shift;;
+        --password-length ) luks_pass_len="$2"; shift; shift;;
+        --keyfile-length ) luks_key_len="$2"; shift; shift;;
         --yes-yes-destroy-break-yes ) confirm=false; shift;;
-        -v | --varbose) set +x ; shift;; # 隠し
-        -h | --help) print_help ; exit;;
+        --without-backup) backup=false; shift;; # 隠し
+        -v | --varbose) set -x ; shift;; # 隠し
+        -h | --help | -*) print_help ; exit;;
         *) break;;
     esac
 done
@@ -54,30 +78,93 @@ done
 
 : "warning" && $confirm && {
     sgdisk -p "$1"
-    read -p "WARNING: You selected $1, If continue will destroy all data on the disk. Continue? [y/n]" yn
+    read -pr "WARNING: If continue will destroy all data on the disk. Continue? [y/n]: " yn
     if [ "${yn}" != "y" ];then
         echo "Cancelled!!"
         exit
     fi
+    echo ""
 }
 
 : "partition" && {
-    bak="$(log_file partition).backup.txt"
-    sgdisk --backup="$bak" "$1"
-    echo "Backup old partition info to $bak. If you need restore, try it:"
-    echo "sgdisk --load-backup=$bak $1"
-    echo ""
+    if $backup;then
+        bak="$(date_file partition).backup.bin"
+        sgdisk --backup="$bak" "$1"
+        echo "Backup old partition info to $bak"
+        echo "If you need restore try it:"
+        echo "sgdisk --load-backup=$bak $1"
+        echo ""
+    fi
     sgdisk -Z -o \
     -n 1::+100M: -t 1:EF00 -c 1:EFI \
-    -n "${boot_num}::+1G" -t "${boot_num}:8300" -c "${boot_num}:boot" \
-    -n "${root_num}::" -t "${root_num}:8309" -c "${root_num}:root" \
+    -n "${boot_num}:${boot_position}" -t "${boot_num}:8300" -c "${boot_num}:boot" \
+    -n "${root_num}::${root_size}" -t "${root_num}:8309" -c "${root_num}:root" \
     -p "$1"
 }
 
+if $no_fs;then
+    exit
+fi
+
+tmp="$1"
+if [[ "$1" == "/dev/nvme"* ]];then
+    tmp+="p"
+fi
+part_efi="${tmp}1"
+part_boot="${tmp}${boot_num}"
+part_root="${tmp}${root_num}"
 : "mkfs" && {
-    prefix=""
-    if [[ "$1" == "/dev/nvme"* ]];then
-        prefix="p"
+    echo "Format EFI partiton (${part_efi})"
+    mkfs.fat -F 32 "${part_efi}"
+    mkfs.ext4 -F "${part_boot}"
+}
+
+# Password length: log62(2^x) == x / log2(62) # 62 == a-zA-Z0-9, x == security bit
+# eg AES256(256 security bit):  log62(2^256) = 42.9 ≈ 43
+# x security bit has 2^x patterns, a-zA-Z0-9 has 62 patterns, n length password has 62^n patterns, over x security bit password length is 62^n > 2^x -> log62(2^n).
+# yes, this formula ignored stretching, etc...
+: "luksFormat" && {
+    if [[ -z "$luks_key" ]];then
+        if [[ "$luks_pass" == "random" ]];then
+            # https://unix.stackexchange.com/questions/230673/how-to-generate-a-random-string
+            luks_pass="$(LC_ALL=C tr -dc "a-zA-Z0-9" </dev/random | head -c "$luks_pass_len")"
+            tmp="$(date_file password).txt"
+            touch "$tmp"
+            chmod 400 "$tmp"
+            echo -n "$luks_pass" > "$tmp"
+            echo "Password saved to ${tmp}"
+        fi
+        if [[ -z "$luks_pass" ]];then
+            cryptsetup luksFormat --batch-mode --use-random "$part_root"
+        else
+            echo -n "$luks_pass" | cryptsetup luksFormat --batch-mode --use-random --key-file - "$part_root"
+        fi
+    else
+        if [[ "$luks_key" == "random" ]];then
+            luks_key="$(date_file key).bin"
+            touch "${luks_key}"
+            chmod 400 "${luks_key}"
+            dd if=/dev/random of="$luks_key" bs="$luks_key_len" count=1
+            echo "Keyfile saved to ${luks_key}"
+        elif [[ ! -f "$luks_key" ]];then
+            echo "$luks_key is not found!"
+            exit 1
+        fi
+        cryptsetup luksFormat --batch-mode --use-random --key-file "$luks_key" "$part_root"
     fi
-    mkfs.fat -F 32 "${1}${prefix}1"
+}
+
+: "luksOpen" && {
+    if [[ -z "$luks_key" ]];then
+        if [[ -z "$luks_pass" ]];then
+            cryptsetup open "$part_root" "$luks_name"
+        else
+            echo -n "$luks_pass" | cryptsetup open --key-file - "$part_root" "$luks_name"
+        fi
+    else
+        cryptsetup open --key-file "$luks_key" "$part_root" "$luks_name"
+    fi
+    mkfs.xfs -m inobtcount=1 -m bigtime=1 "/dev/mapper/${luks_name}"
+    echo "run this command first if you need retry:"
+    echo "cryptsetup close ${luks_name}"
 }
