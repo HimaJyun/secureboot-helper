@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 : "dropbear" && {
-    apt install "dropbear-initramfs"
+    apt install -y "dropbear-initramfs"
     if $config;then
       sed -i "/^DROPBEAR_OPTIONS=/s/^/DROPBEAR_OPTIONS=\"-I 180 -p ${port} -j -k -s\"\n#/" /etc/dropbear/initramfs/dropbear.conf
     fi

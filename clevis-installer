@@ -1,0 +1,63 @@
+#!/bin/bash -eu
+SCRIPT="$(basename "$0")"
+
+function print_help () {
+    cat << EOL
+$SCRIPT: automatic clevis-tpm installer.
+Usage: $0 [OPTIONS...]
+
+Options:
+  -k, --keyfile: LUKS key file
+  -p, --password: LUKS password
+  -s, --slot: TPM slot (default: 0,1,7)
+  -b, --bank: TPM bank (default: sha256)
+  -d, --device: target device (eg: /dev/nvme0n1p1)
+  -h, --help: Show this help.
+EOL
+}
+
+if [[ "$(id -u)" -ne 0 ]];then
+    print_help
+    echo ""
+    echo "$SCRIPT: require root."
+    exit 1
+fi
+
+keyfile=""
+password=""
+slot="0,1,7"
+bank="sha256"
+device=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -k | --keyfile | --key ) keyfile="$2"; shift; shift;;
+        -p | --password | --pass ) password="$2"; shift; shift;;
+        -s | --slot | --pcr | --tpm-pcr | --pcr-ids ) slot="$2"; shift; shift;;
+        -b | --bank | --hash | --tpm-hash | --pcr-bank ) bank="$2"; shift; shift;;
+        -d | --device ) device="$2"; shift; shift;;
+        -v | --varbose) set -x; shift;; # 隠し
+        -h | --help | *) print_help ; exit;;
+    esac
+done
+
+: "install clevis" && {
+    apt install -y clevis-tpm2 clevis-initramfs
+}
+
+: "detect device" && test -z "$device" && {
+    root="$(df -P | awk '$6=="/"{print $1}')"
+    device="$(cryptsetup status "$root" | awk '$1=="device:"{print $2}')"
+}
+
+: "clevis bind" && {
+    tpm="{\"pcr_bank\":\"$bank\",\"pcr_ids\":\"$slot\"}"
+    if [[ -z "$keyfile" ]];then
+        if [[ -z "$password" ]];then
+            clevis luks bind -d "$device" tpm2 "$tpm"
+        else
+            echo -n "$password" | clevis luks bind -d "$device" -k - tpm2 "$tpm"
+        fi
+    else
+        clevis luks bind -d "$device" -k "$keyfile" tpm2 "$tpm"
+    fi
+}
