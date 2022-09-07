@@ -3,7 +3,7 @@ SCRIPT="$(basename "$0")"
 
 function print_help () {
     cat << EOL
-$SCRIPT: automatic automatic patition setup for LUKS without LVM.
+$SCRIPT: automatic patition setup for LUKS without LVM.
 Usage: $0 [OPTIONS...] /dev/<device>
 
 Options:
@@ -78,7 +78,7 @@ done
 
 : "warning" && $confirm && {
     sgdisk -p "$1"
-    read -pr "WARNING: If continue will destroy all data on the disk. Continue? [y/n]: " yn
+    read -r -p "WARNING: If continue will destroy all data on the disk. Continue? [y/n]: " yn
     if [ "${yn}" != "y" ];then
         echo "Cancelled!!"
         exit
