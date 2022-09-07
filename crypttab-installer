@@ -54,7 +54,7 @@ fi
 : "Get partition info" && {
     mounted="$(df -P | awk '$6=="/target"{print $1}')"
     if [[ -z "$mapper" ]];then
-        mapper="${mounted#/dev/mapper}"
+        mapper="${mounted#/dev/mapper/}"
     fi
     if [[ -z "$root" ]];then
         root="$(cryptsetup status "$mounted" | awk '$1=="device:"{print $2}')"
@@ -92,7 +92,7 @@ fi
     if $ssd;then
         option+=",no-read-workqueue,no-write-workqueue"
     fi
-    echo -n "$mapper UUID=$root none $option" | tee /target/etc/crypttab
+    echo "$mapper UUID=$root none $option" | tee /target/etc/crypttab
 }
 
 : "regen initramfs" && {
@@ -101,5 +101,6 @@ fi
     mount -t proc none /target/proc
     mount -o bind /dev /target/dev
     mount -o bind /sys /target/sys
-    chroot /target update-initramfs -u
+    chroot /target /bin/bash -c "update-initramfs -u"
+    umount /target/{boot/efi,boot}
 }
