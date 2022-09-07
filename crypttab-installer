@@ -1,0 +1,106 @@
+#!/bin/bash -eu
+SCRIPT="$(basename "$0")"
+
+function print_help () {
+    cat << EOL
+$SCRIPT: automatic crypttab installer for LUKS on Ubuntu wituout LVM.
+Usage: $0 [OPTIONS...]
+
+Options:
+  -s, --ssd: SSD optimize (use no-read-workqueue, no-write-workqueue LUKS option)
+  -e, --efi: EFI partition (eg: /dev/nvme0n1p1)
+  -b, --boot: Boot partition (eg: /dev/nvme0n1p2)
+  -r, --root: root partition (eg: /dev/nvme0n1p3)
+  -m, --mapper: /dev/mapper/<name>
+  -d, --discard: Switch discard LUKS option (default true if --ssd specified, false otherwise)
+  -h, --help: Show this help.
+EOL
+}
+
+if [[ "$(id -u)" -ne 0 ]];then
+    print_help
+    echo ""
+    echo "$SCRIPT: require root."
+    exit 1
+fi
+
+ssd=false
+discard=false
+boot=""
+efi=""
+root=""
+mapper=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -s | --ssd ) ssd=true; shift;; # 自動検出できるけど、複雑になるのであえてしない
+        -e | --efi ) efi="$2" ; shift; shift;;
+        -b | --boot) boot="$2" ; shift; shift;;
+        -r | --root) root="$2" ; shift; shift;;
+        -m | --mapper) mapper="$2" ; shift; shift;;
+        -d | --discard) discard=true ; shift;;
+        -v | --varbose) set +x ; shift;; # 隠し
+        -h | --help | *) print_help ; exit;;
+    esac
+done
+
+if $ssd;then
+    if $discard;then
+        discard=false
+    else
+        discard=true
+    fi
+fi
+
+: "Get partition info" && {
+    mounted="$(df -P | awk '$6=="/target"{print $1}')"
+    if [[ -z "$mapper" ]];then
+        mapper="${mounted#/dev/mapper}"
+    fi
+    if [[ -z "$root" ]];then
+        root="$(cryptsetup status "$mounted" | awk '$1=="device:"{print $2}')"
+    fi
+    if [[ "$root" == "/dev/nvme"* ]];then
+        part_base="$(echo "$root" | sed -r 's/p[0-9]+$//')"
+        part_prefix="p"
+    else
+        part_base="$(echo "$root" | sed -r 's/[0-9]+$//')"
+        part_prefix=""
+    fi
+    root_uuid="$(blkid | grep -e "^${root}:" | sed -r 's/.+UUID="(.+).+"/\1/')"
+
+    if [[ -z "$efi" ]];then
+        num="$(sgdisk -p "$part_base" | awk '$6=="EF00" {print $1}')"
+        efi="${part_base}${part_prefix}${num}"
+    fi
+
+    if [[ -z "$boot" ]];then
+        part="$(find /dev/ -maxdepth 1 | grep -e "${part_base}${part_prefix}[^${root#"$part_base$part_prefix"}${efi#"$part_base$part_prefix"}]")"
+        if [[ "$(echo "$part" | wc -l)" -gt 1 ]];then
+            echo "can't detect boot partition: $(echo "$part" | tr "\n" "? ")"
+            echo "use --boot flag for select boot partition"
+            exit 1
+        fi 
+        boot="$part"
+    fi
+}
+
+: "crypttab" && {
+    option="luks"
+    if $discard;then
+        option+=",discard"
+    fi
+    if $ssd;then
+        option+=",no-read-workqueue,no-write-workqueue"
+    fi
+    echo -n "$mapper UUID=$root none $option" | tee /target/etc/crypttab
+}
+
+: "regen initramfs" && {
+    mount "$boot" /target/boot
+    mount "$efi" /target/boot/efi
+    mount -t proc none /target/proc
+    mount -o bind /dev /target/dev
+    mount -o bind /sys /target/sys
+    chroot /target
+    update-initramfs -u
+}
