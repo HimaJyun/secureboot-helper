@@ -46,7 +46,7 @@ done
         part_base="$(echo "$root" | sed -r 's/[0-9]+$//')"
         part_prefix=""
     fi
-    root_uuid="$(blkid | grep -e "^${root}:" | sed -r 's/.+ UUID="([a-fA-F0-9\-]{36})".+/\1/')"
+    root_uuid="$(blkid -s UUID -o value ${root})"
 
     if [[ -z "$efi" ]];then
         num="$(sgdisk -p "$part_base" | awk '$6=="EF00" {print $1}')"
@@ -71,6 +71,7 @@ done
     mount -o bind /sys /target/sys
     mount -o bind /dev /target/dev
     mount -o bind /dev/pts /target/dev/pts
+    chroot /target systemd-machine-id-setup
     chroot /target bootctl install
     umount /target/{dev/pts,dev,sys,proc}
 }
@@ -90,7 +91,7 @@ editor no
 EOL
 echo ""
 
-cp -fv /target/boot/vmlinuz /target/boot/efi/
-cp -fv /target/boot/initrd.img /target/boot/efi/
+cp -Lfv /target/boot/vmlinuz /target/boot/efi/
+cp -Lfv /target/boot/initrd.img /target/boot/efi/
 
 umount /target/{boot/efi,boot}

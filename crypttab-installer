@@ -66,7 +66,7 @@ fi
         part_base="$(echo "$root" | sed -r 's/[0-9]+$//')"
         part_prefix=""
     fi
-    root_uuid="$(blkid | grep -e "^${root}:" | sed -r 's/.+ UUID="([a-fA-F0-9\-]{36})".+/\1/')"
+    root_uuid="$(blkid -s UUID -o value ${root})"
 
     if [[ -z "$efi" ]];then
         num="$(sgdisk -p "$part_base" | awk '$6=="EF00" {print $1}')"
