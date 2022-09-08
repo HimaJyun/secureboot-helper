@@ -46,7 +46,7 @@ done
         part_base="$(echo "$root" | sed -r 's/[0-9]+$//')"
         part_prefix=""
     fi
-    root_uuid="$(blkid -s UUID -o value ${root})"
+    luks_uuid="$(blkid -s UUID -o value ${mounted})"
 
     if [[ -z "$efi" ]];then
         num="$(sgdisk -p "$part_base" | awk '$6=="EF00" {print $1}')"
@@ -64,24 +64,16 @@ done
     fi
 }
 
-: "install systemd-boot" && {
-    mount "$boot" /target/boot
-    mount "$efi" /target/boot/efi
-    mount -t proc none /target/proc
-    mount -o bind /sys /target/sys
-    mount -o bind /dev /target/dev
-    mount -o bind /dev/pts /target/dev/pts
-    chroot /target systemd-machine-id-setup
-    chroot /target bootctl install
-    umount /target/{dev/pts,dev,sys,proc}
-}
+mount "$boot" /target/boot
+mount "$efi" /target/boot/efi
+bootctl "--esp-path=${efi}" "--boot-path=${boot}" --make-machine-id-directory=no install
 
 source /target/etc/os-release
 cat << EOL | tee /target/boot/efi/loader/entries/boot.conf
 title $PRETTY_NAME
 linux /vmlinuz
 initrd /initrd.img
-options root=UUID=$root_uuid ro quiet splash
+options root=UUID=$luks_uuid ro quiet splash
 EOL
 echo ""
 
