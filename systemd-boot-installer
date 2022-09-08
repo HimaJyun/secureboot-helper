@@ -3,16 +3,13 @@ SCRIPT="$(basename "$0")"
 
 function print_help () {
     cat << EOL
-$SCRIPT: automatic crypttab installer for LUKS on Ubuntu wituout LVM.
+$SCRIPT: automatic systemd-boot installer.
 Usage: $0 [OPTIONS...]
 
 Options:
-  -s, --ssd: SSD optimize (use no-read-workqueue, no-write-workqueue LUKS option)
   -e, --efi: EFI partition (eg: /dev/nvme0n1p1)
   -b, --boot: Boot partition (eg: /dev/nvme0n1p2)
   -r, --root: root partition (eg: /dev/nvme0n1p3)
-  -m, --mapper: /dev/mapper/<name>
-  -d, --discard: Switch discard LUKS option (default true if --ssd specified, false otherwise)
   -h, --help: Show this help.
 EOL
 }
@@ -24,38 +21,21 @@ if [[ "$(id -u)" -ne 0 ]];then
     exit 1
 fi
 
-ssd=false
-discard=false
 boot=""
 efi=""
 root=""
-mapper=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -s | --ssd ) ssd=true; shift;; # 自動検出できるけど、複雑になるのであえてしない
         -e | --efi ) efi="$2" ; shift; shift;;
         -b | --boot) boot="$2" ; shift; shift;;
         -r | --root) root="$2" ; shift; shift;;
-        -m | --mapper) mapper="$2" ; shift; shift;;
-        -d | --discard) discard=true ; shift;;
         -v | --varbose) set -x ; shift;; # 隠し
         -h | --help | *) print_help ; exit;;
     esac
 done
 
-if $ssd;then
-    if $discard;then
-        discard=false
-    else
-        discard=true
-    fi
-fi
-
 : "Get partition info" && {
     mounted="$(df -P | awk '$6=="/target"{print $1}')"
-    if [[ -z "$mapper" ]];then
-        mapper="${mounted#/dev/mapper/}"
-    fi
     if [[ -z "$root" ]];then
         root="$(cryptsetup status "$mounted" | awk '$1=="device:"{print $2}')"
     fi
@@ -84,24 +64,33 @@ fi
     fi
 }
 
-: "crypttab" && {
-    option="luks"
-    if $discard;then
-        option+=",discard"
-    fi
-    if $ssd;then
-        option+=",no-read-workqueue,no-write-workqueue"
-    fi
-    echo "$mapper UUID=$root_uuid none $option" | tee /target/etc/crypttab
-}
-
-: "regen initramfs" && {
+: "install systemd-boot" && {
     mount "$boot" /target/boot
     mount "$efi" /target/boot/efi
     mount -t proc none /target/proc
     mount -o bind /sys /target/sys
     mount -o bind /dev /target/dev
     mount -o bind /dev/pts /target/dev/pts
-    chroot /target update-initramfs -u
-    umount /target/{dev/pts,dev,sys,proc,boot/efi,boot}
+    chroot /target bootctl install
+    umount /target/{dev/pts,dev,sys,proc}
 }
+
+source /target/etc/os-release
+cat << EOL | tee /target/boot/efi/loader/entries/boot.conf
+title $PRETTY_NAME
+linux /vmlinuz
+initrd /initrd.img
+options root=UUID=$root_uuid ro quiet splash
+EOL
+echo ""
+
+cat << EOL | tee /target/boot/efi/loader/loader.conf
+default boot
+editor no
+EOL
+echo ""
+
+cp -fv /target/boot/vmlinuz /target/boot/efi/
+cp -fv /target/boot/initrd.img /target/boot/efi/
+
+umount /target/{boot/efi,boot}
