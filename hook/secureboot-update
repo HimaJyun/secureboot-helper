@@ -1,0 +1,23 @@
+#!/bin/bash -eu
+# shellcheck disable=SC2064 source=/dev/null
+if [[ "$(id -u)" -ne 0 ]];then
+    echo "$(basename "$0"): require root."
+    exit 1
+fi
+if [[ $# -lt 3 ]];then
+    echo "Usage: $0 <config> </path/to/vmlinuz> </path/to/initrd.img>"
+fi
+test -f "$1" && source "$1"
+
+tmp="$(mktemp -d)"
+trap "rm -r '${tmp}'" EXIT
+
+objcopy \
+    --add-section .osrel="$OS_RELEASE" --change-section-vma .osrel=0x20000 \
+    --add-section .cmdline="$CMDLINE_FILE" --change-section-vma .cmdline=0x30000 \
+    --add-section .linux="$(readlink -f "$2")" --change-section-vma .linux=0x40000 \
+    --add-section .initrd="$(readlink -f "$3")" --change-section-vma .initrd=0x3000000 \
+    "$EFI_STUB" "${tmp}/unsigned.efi"
+
+sbsign --key "$SECUREBOOT_KEY" --cert "$SECUREBOOT_CERT" --output "${tmp}/linux-signed.efi" "${tmp}/unsigned.efi"
+mv -f "${tmp}/linux-signed.efi" "${EFI_PATH}/linux-signed.efi"

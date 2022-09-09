@@ -1,0 +1,8 @@
+[Unit]
+Description=Secure boot Unified kernel updater
+
+[Path]
+PathChanged=/usr/lib/systemd/boot/efi/linuxx64.efi.stub
+
+[Install]
+WantedBy=multi-user.target

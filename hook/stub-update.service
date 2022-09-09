@@ -1,0 +1,6 @@
+[Unit]
+Description=Secure boot Unified kernel updater
+
+[Service]
+Type=oneshot
+ExecStart=/etc/secureboot/secureboot-update /etc/secureboot/secureboot.conf /boot/vmlinuz /boot/initrd.img

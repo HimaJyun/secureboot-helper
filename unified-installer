@@ -1,0 +1,241 @@
+#!/bin/bash -eu
+# shellcheck disable=SC2064
+# https://wiki.archlinux.org/title/Secure_Boot
+# https://github.com/electrickite/sbkeys/blob/master/sbkeys
+SCRIPT="$(basename "$0")"
+SCRIPT_DIR="$(cd "$SCRIPT"; pwd)"
+
+function print_help () {
+    cat << EOL
+$SCRIPT: automatic unified kernel installer.
+Usage: $0 [OPTIONS...]
+
+Options:
+  -e, --efi: EFI directory
+  -s, --stud: EFI stub binaly (default: /usr/lib/systemd/boot/efi/linuxx64.efi.stub)
+  -b, --bit, --rsa-bit: RSA key bit (default: 2048)
+  -d, --days, --rsa-days: RSA key expiry (default: 3650)
+  -c, --common-name: Key common name (default: $(hostname))
+  -l, --link-mode: hook shell link mode (copy,symlink,hardlink default: copy)
+  -w, --without-stub-update: without stub-update.path unit
+  -r, --register: automatic register
+  -x, --dbx: Use existing dbx if auto register
+  -m, --ms-keys: add Microsoft keys (both Windows and UEFI)
+  --ms-win: add Microsoft Windows Production PCA 2011
+  --ms-uefi: add Microsoft Corporation UEFI CA 2011 (recommend for UEFI driver)
+  -h, --help: Show this help.
+EOL
+}
+
+if [[ "$(id -u)" -ne 0 ]];then
+    print_help
+    echo ""
+    echo "$SCRIPT: require root."
+    exit 1
+fi
+
+efi=""
+stub="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+rsa_bit="2048"
+rsa_days="3650"
+common_name="$(hostname)"
+link_mode="copy"
+stub_update=true
+use_dbx=false
+auto_register=false
+ms_win=false
+ms_uefi=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -e | --efi ) efi="$2" ; shift; shift;;
+        -s | --stub | --efi-stub ) stub="$2" ; shift; shift;;
+        -b | --bit | --bits ) rsa_bit="$2" ; shift; shift;;
+        -d | --days | --day ) rsa_bit="$2" ; shift; shift;;
+        -c | --common-name | --cn | --commonname ) common_name="$2" ; shift; shift;;
+        -l | --link | --link-mode | --mode ) link_mode="$2" ; shift; shift;;
+        -w | --without-stub-update ) stub_update=false ; shift;;
+        -x | --dbx ) use_dbx=true; shift;;
+        -r | --register ) auto_register=true; shift;;
+        -m | --ms-key | --ms-keys | --ms ) ms_win=true; ms_uefi=true; shift;;
+        --ms-win | --ms-windows ) ms_win=true; shift;;
+        --ms-uefi ) ms_uefi=true; shift;;
+        -v | --varbose) set -x ; shift;; # 隠し
+        -h | --help | *) print_help ; exit;;
+    esac
+done
+
+# マザーボードメーカーによっては鍵のCNが一部しか表示されないため、インポートされた鍵が正しいかを確認するために「種類 CN」の形にする
+if [[ -n "$common_name" ]];then
+    common_name=" ${common_name}"
+fi
+
+case "$link_mode" in
+    copy | c ) link_mode="copy"; shift;;
+    symlink | sym | s | soft ) link_mode="symlink"; shift;;
+    hardlink | hard | h ) link_mode="hardlink"; shift;;
+    *)
+        print_help
+        echo ""
+        echo "-l $link_mode is invalid! only available copy, symlink, hardlink!!"
+        exit 1
+esac
+
+function file_from () {
+    file="${SCRIPT_DIR}/$1"
+    if [[ ! -f "$file" ]];then
+        # なければダウンロード
+        curl -L -o "$2" "https://raw.githubusercontent.com/HimaJyun/secureboot-helper/main/$1"
+        if [[ $# -ge 3 ]];then
+            chmod "$3" "$2"
+        fi
+    else
+        case "$link_mode" in
+            "copy") cp "$file" "$2";;
+            "symlink") ln -s "$(readlink -f "$file")" "$2";;
+            "hardlink") ln "$file" "$2";;
+        esac
+    fi
+}
+
+: "detect efi partition" && test -z "$efi" && {
+    root="$(df -P | awk '$6=="/" {print $1}')"
+    if [[ "$root" == "/dev/mapper/"* ]];then
+        root="$(cryptsetup status "$root" | awk '$1=="device:"{print $2}')"
+    fi
+    if [[ "$root" == "/dev/nvme"* ]];then
+        part_base="$(echo "$root" | sed -r 's/p[0-9]+$//')"
+        part_prefix="p"
+    else
+        part_base="$(echo "$root" | sed -r 's/[0-9]+$//')"
+        part_prefix=""
+    fi
+
+    num="$(sgdisk -p "$part_base" | awk '$6=="EF00" {print $1}')"
+    if [[ -n "$num" ]];then
+        efi="$(df -P | awk "\$1==\"${part_base}${part_prefix}${num}\" {print \$1}")"
+    fi
+    if [[ -z "$efi" ]];then
+        if [[ -d "/boot/efi" ]];then
+            efi="/boot/efi"
+        elif [[ -d "/efi" ]];then
+            efi="/efi"
+        else
+            echo "Can't find EFI directory! Use --efi option for specify EFI directory."
+            exit 1
+        fi
+    fi
+}
+
+apt install -y binutils efibootmgr efitools
+
+: "generate keys" && {
+    old_umask="$(umask)"
+    trap "umask ${old_umask}" EXIT
+    umask 077
+    mkdir -pfv /etc/secureboot/keys
+    cd /etc/secureboot/keys
+
+    efi-readvar -v PK -o old_PK.esl
+    efi-readvar -v KEK -o old_KEK.esl
+    efi-readvar -v db -o old_db.esl
+    efi-readvar -v dbx -o old_dbx.esl
+
+    uuidgen --random > GUID
+
+    # PK
+    openssl req -newkey "rsa:${rsa_bit}" -nodes -keyout PK.key -new -x509 -sha256 -days "${rsa_days}" -subj "/CN=PK${common_name}/" -out PK.crt
+    openssl x509 -outform DER -in PK.crt -out PK.cer
+    cert-to-efi-sig-list -g "$(< GUID)" PK.crt PK.esl
+    sign-efi-sig-list -g "$(< GUID)" -k PK.key -c PK.crt PK PK.esl PK.auth
+    sign-efi-sig-list -g "$(< GUID)" -k PK.key -c PK.crt PK /dev/null rm_PK.auth
+
+    # KEK
+    openssl req -newkey "rsa:${rsa_bit}" -nodes -keyout KEK.key -new -x509 -sha256 -days "${rsa_days}" -subj "/CN=KEK${common_name}/" -out KEK.crt
+    openssl x509 -outform DER -in KEK.crt -out KEK.cer
+    cert-to-efi-sig-list -g "$(< GUID)" KEK.crt KEK.esl
+    sign-efi-sig-list -g "$(< GUID)" -k PK.key -c PK.crt KEK KEK.esl KEK.auth
+
+    # DB
+    openssl req -newkey "rsa:${rsa_bit}" -nodes -keyout db.key -new -x509 -sha256 -days "${rsa_days}" -subj "/CN=db${common_name}/" -out db.crt
+    openssl x509 -outform DER -in db.crt -out db.cer
+    cert-to-efi-sig-list -g "$(< GUID)" db.crt db.esl
+    sign-efi-sig-list -g "$(< GUID)" -k KEK.key -c KEK.crt db db.esl db.auth
+
+    # MS Win
+    ms_guid="77fa9abd-0359-4d32-bd60-28f4e78f784b"
+    if $ms_win;then
+        curl -sL -o "ms_win.crt" "https://www.microsoft.com/pkiops/certs/MicWinProPCA2011_2011-10-19.crt"
+        sbsiglist --owner "$ms_guid" --type x509 --output "ms_win.esl" "ms_win.crt"
+        sign-efi-sig-list -a -g "$ms_guid" -k KEK.key -c KEK.crt db "ms_win.esl" "ms_win.auth"
+    fi
+    if $ms_uefi;then
+        curl -sL -o "ms_uefi.crt" "https://www.microsoft.com/pkiops/certs/MicCorUEFCA2011_2011-06-27.crt"
+        sbsiglist --owner "$ms_guid" --type x509 --output "ms_uefi.esl" "ms_uefi.crt"
+        sign-efi-sig-list -a -g "$ms_guid" -k KEK.key -c KEK.crt db "ms_uefi.esl" "ms_uefi.auth"
+    fi
+
+    trap "true" EXIT
+    umask "$old_umask"
+}
+
+# CMDLINE
+if [[ ! -f "/etc/kernel/cmdline" ]];then
+    # https://qiita.com/d-ebi/items/c26de9f0c464e5d456c6
+    sed -r "s/initrd=[^ ]* //" /proc/cmdline > /etc/kernel/cmdline
+    echo "/etc/kernel/cmdline is not found! copied from /proc/cmdline"
+fi
+
+# Generate config
+cd cd /etc/secureboot/
+cat << EOL > ./secureboot.conf
+OS_RELEASE="/etc/os-release"
+CMDLINE_FILE="/etc/kernel/cmdline"
+
+EFI_PATH="$efi/EFI/Linux/"
+EFI_STUB="$stub"
+
+SECUREBOOT_KEY="/etc/secureboot/keys/db.key"
+SECUREBOOT_CERT="/etc/secureboot/keys/db.crt"
+EOL
+chmod 700 ./secureboot.conf
+file_from "hook/secureboot-update" "./secureboot-update" "700"
+
+# Generate hook
+mkdir -p /etc/initramfs/post-update.d #/etc/kernel/postinst.d
+file_from "hook/sign-kernel" "/etc/initramfs/post-update.d/sign-kernel" "700"
+
+# 初回生成
+./secureboot-update ./secureboot.conf /boot/vmlinuz /boot/initrd.img
+
+: "register stub update watch service" && $stub_update && {
+    file_from "hook/stub-update.path" "/etc/systemd/system/stub-update.path"
+    file_from "hook/stub-update.service" "/etc/systemd/system/stub-update.service"
+    systemctl daemon-reload
+    systemctl enable stub-update.path
+}
+
+: "register EFI entry" && {
+    efi_disk="$(df -P "$efi" | tail -1 | cut -d " " -f 1)"
+    efibootmgr -c --label "Linux SecureBoot" --disk "$efi_disk" --loader '\EFI\Linux\linux-signed.efi'
+}
+
+# 鍵登録
+: "register keys to UEFI" && $auto_register && {
+    mkdir -pfv /etc/secureboot/keys/{db,dbx,KEK,PK}
+    cd /etc/secureboot/keys
+    cp -f PK.auth PK/
+    cp -f KEK.auth KEK/
+    cp -f db.auth db/
+    if $ms_win;then
+        cp -f ms_win.auth db/
+    fi
+    if $ms_uefi;then
+        cp -f ms_uefi.auth db/
+    fi
+    if $use_dbx;then
+        sign-efi-sig-list -a -k KEK.key -c KEK.crt dbx "old_dbx.esl" "old_dbx.auth"
+        cp -f old_dbx.auth dbx/
+    fi
+    chattr -i /sys/firmware/efi/efivars/{PK,KEK,db,dbx}*
+    sbkeysync --verbose --pk
+}
