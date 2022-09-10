@@ -1,4 +1,4 @@
 #!/bin/bash -eu
 echo "Signing new Unified kernel image: $1"
-/etc/secureboot/secureboot-efi-update "/etc/secureboot/secureboot.conf" "/boot/vmlinuz-$1" "/boot/initrd.img-$1"
+/etc/secureboot/secureboot-update "/etc/secureboot/secureboot.conf" "/boot/vmlinuz-$1" "/boot/initrd.img-$1"
 echo "Signed!"

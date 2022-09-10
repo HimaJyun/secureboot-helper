@@ -3,7 +3,7 @@
 # https://wiki.archlinux.org/title/Secure_Boot
 # https://github.com/electrickite/sbkeys/blob/master/sbkeys
 SCRIPT="$(basename "$0")"
-SCRIPT_DIR="$(cd "$SCRIPT"; pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
 
 function print_help () {
     cat << EOL
@@ -70,9 +70,9 @@ if [[ -n "$common_name" ]];then
 fi
 
 case "$link_mode" in
-    copy | c ) link_mode="copy"; shift;;
-    symlink | sym | s | soft ) link_mode="symlink"; shift;;
-    hardlink | hard | h ) link_mode="hardlink"; shift;;
+    copy | c ) link_mode="copy";;
+    symlink | sym | s | soft ) link_mode="symlink";;
+    hardlink | hard | h ) link_mode="hardlink";;
     *)
         print_help
         echo ""
@@ -112,7 +112,7 @@ function file_from () {
 
     num="$(sgdisk -p "$part_base" | awk '$6=="EF00" {print $1}')"
     if [[ -n "$num" ]];then
-        efi="$(df -P | awk "\$1==\"${part_base}${part_prefix}${num}\" {print \$1}")"
+        efi="$(df -P | awk "\$1==\"${part_base}${part_prefix}${num}\" {print \$6}")"
     fi
     if [[ -z "$efi" ]];then
         if [[ -d "/boot/efi" ]];then
@@ -132,7 +132,7 @@ apt install -y binutils efibootmgr efitools
     old_umask="$(umask)"
     trap "umask ${old_umask}" EXIT
     umask 077
-    mkdir -pfv /etc/secureboot/keys
+    mkdir -pv /etc/secureboot/keys
     cd /etc/secureboot/keys
 
     efi-readvar -v PK -o old_PK.esl
@@ -186,12 +186,12 @@ if [[ ! -f "/etc/kernel/cmdline" ]];then
 fi
 
 # Generate config
-cd cd /etc/secureboot/
+cd /etc/secureboot/
 cat << EOL > ./secureboot.conf
 OS_RELEASE="/etc/os-release"
 CMDLINE_FILE="/etc/kernel/cmdline"
 
-EFI_PATH="$efi/EFI/Linux/"
+EFI_PATH="$efi/EFI/Linux"
 EFI_STUB="$stub"
 
 SECUREBOOT_KEY="/etc/secureboot/keys/db.key"
@@ -221,7 +221,7 @@ file_from "hook/sign-kernel" "/etc/initramfs/post-update.d/sign-kernel" "700"
 
 # 鍵登録
 : "register keys to UEFI" && $auto_register && {
-    mkdir -pfv /etc/secureboot/keys/{db,dbx,KEK,PK}
+    mkdir -p /etc/secureboot/keys/{db,dbx,KEK,PK}
     cd /etc/secureboot/keys
     cp -f PK.auth PK/
     cp -f KEK.auth KEK/
