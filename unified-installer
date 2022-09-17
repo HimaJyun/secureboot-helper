@@ -12,7 +12,7 @@ Usage: $0 [OPTIONS...]
 
 Options:
   -e, --efi: EFI directory
-  -s, --stud: EFI stub binaly (default: /usr/lib/systemd/boot/efi/linuxx64.efi.stub)
+  -s, --stub: EFI stub binaly (default: /usr/lib/systemd/boot/efi/linuxx64.efi.stub)
   -b, --bit, --rsa-bit: RSA key bit (default: 2048)
   -d, --days, --rsa-days: RSA key expiry (default: 3650)
   -c, --common-name: Key common name (default: $(hostname))
@@ -90,7 +90,7 @@ function file_from () {
         fi
     else
         case "$link_mode" in
-            "copy") cp "$file" "$2";;
+            "copy") cp "$file" "$2";chmod "$3" "$2";;
             "symlink") ln -s "$(readlink -f "$file")" "$2";;
             "hardlink") ln "$file" "$2";;
         esac
@@ -140,7 +140,7 @@ apt install -y binutils efibootmgr efitools
     efi-readvar -v db -o old_db.esl
     efi-readvar -v dbx -o old_dbx.esl
 
-    uuidgen --random > GUID
+    cp /proc/sys/kernel/random/uuid GUID
 
     # PK
     openssl req -newkey "rsa:${rsa_bit}" -nodes -keyout PK.key -new -x509 -sha256 -days "${rsa_days}" -subj "/CN=PK${common_name}/" -out PK.crt
@@ -160,6 +160,10 @@ apt install -y binutils efibootmgr efitools
     openssl x509 -outform DER -in db.crt -out db.cer
     cert-to-efi-sig-list -g "$(< GUID)" db.crt db.esl
     sign-efi-sig-list -g "$(< GUID)" -k KEK.key -c KEK.crt db db.esl db.auth
+
+    if $use_dbx;then
+        sign-efi-sig-list -a -k KEK.key -c KEK.crt dbx "old_dbx.esl" "old_dbx.auth"
+    fi
 
     # MS Win
     ms_guid="77fa9abd-0359-4d32-bd60-28f4e78f784b"
@@ -233,7 +237,6 @@ file_from "hook/sign-kernel" "/etc/initramfs/post-update.d/sign-kernel" "700"
         cp -f ms_uefi.auth db/
     fi
     if $use_dbx;then
-        sign-efi-sig-list -a -k KEK.key -c KEK.crt dbx "old_dbx.esl" "old_dbx.auth"
         cp -f old_dbx.auth dbx/
     fi
     chattr -i /sys/firmware/efi/efivars/{PK,KEK,db,dbx}*

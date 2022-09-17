@@ -12,6 +12,7 @@ test -f "$1" && source "$1"
 tmp="$(mktemp -d)"
 trap "rm -r '${tmp}'" EXIT
 
+mkdir -p "$EFI_PATH"
 objcopy \
     --add-section .osrel="$OS_RELEASE" --change-section-vma .osrel=0x20000 \
     --add-section .cmdline="$CMDLINE_FILE" --change-section-vma .cmdline=0x30000 \

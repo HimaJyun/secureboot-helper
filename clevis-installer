@@ -60,4 +60,5 @@ done
     else
         clevis luks bind -d "$device" -k "$keyfile" tpm2 "$tpm"
     fi
+    update-initramfs -u
 }
