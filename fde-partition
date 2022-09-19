@@ -96,7 +96,7 @@ done
         echo ""
     fi
     sgdisk -Z -o \
-    -n 1::+500M: -t 1:EF00 -c 1:EFI \
+    -n 1::+500M -t 1:EF00 -c 1:EFI \
     -n "${boot_num}:${boot_position}" -t "${boot_num}:8300" -c "${boot_num}:boot" \
     -n "${root_num}::${root_size}" -t "${root_num}:8309" -c "${root_num}:root" \
     -p "$1"
