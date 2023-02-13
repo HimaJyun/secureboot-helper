@@ -20,8 +20,9 @@ Options:
   -w, --without-stub-update: without stub-update.path unit
   -r, --register: automatic register
   -x, --dbx: Use existing dbx if auto register
-  -m, --ms-keys: add Microsoft keys (both Windows and UEFI)
+  -m, --ms-keys: add Microsoft keys
   --ms-win: add Microsoft Windows Production PCA 2011
+  --ms-kek: add Microsoft Corporation KEK CA 2011
   --ms-uefi: add Microsoft Corporation UEFI CA 2011 (recommend for UEFI driver)
   -h, --help: Show this help.
 EOL
@@ -45,6 +46,8 @@ use_dbx=false
 auto_register=false
 ms_win=false
 ms_uefi=false
+ms_kek=false
+#ms_dbx=false # https://uefi.org/revocationlistfile
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -e | --efi ) efi="$2" ; shift; shift;;
@@ -56,8 +59,9 @@ while [[ $# -gt 0 ]]; do
         -w | --without-stub-update ) stub_update=false ; shift;;
         -x | --dbx ) use_dbx=true; shift;;
         -r | --register ) auto_register=true; shift;;
-        -m | --ms-key | --ms-keys | --ms ) ms_win=true; ms_uefi=true; shift;;
+        -m | --ms-key | --ms-keys | --ms ) ms_win=true; ms_uefi=true; ms_kek=true; shift;;
         --ms-win | --ms-windows ) ms_win=true; shift;;
+        --ms-kek ) ms_kek=true; shift;;
         --ms-uefi ) ms_uefi=true; shift;;
         -v | --varbose) set -x ; shift;; # 隠し
         -h | --help | *) print_help ; exit;;
@@ -177,6 +181,11 @@ apt install -y binutils efibootmgr efitools
         sbsiglist --owner "$ms_guid" --type x509 --output "ms_uefi.esl" "ms_uefi.crt"
         sign-efi-sig-list -a -g "$ms_guid" -k KEK.key -c KEK.crt db "ms_uefi.esl" "ms_uefi.auth"
     fi
+    if $ms_kek;then
+        curl -sL -o "ms_kek.crt" "https://www.microsoft.com/pkiops/certs/MicCorKEKCA2011_2011-06-24.crt"
+        sbsiglist --owner "$ms_guid" --type x509 --output "ms_kek.esl" "ms_kek.crt"
+        sign-efi-sig-list -a -g "$ms_guid" -k PK.key -c PK.crt db "ms_kek.esl" "ms_kek.auth"
+    fi
 
     trap "true" EXIT
     umask "$old_umask"
@@ -230,6 +239,9 @@ file_from "hook/sign-kernel" "/etc/initramfs/post-update.d/sign-kernel" "700"
     cp -f PK.auth PK/
     cp -f KEK.auth KEK/
     cp -f db.auth db/
+    if $ms_kek;then
+        cp -f ms_kek.auth KEK/
+    fi
     if $ms_win;then
         cp -f ms_win.auth db/
     fi
