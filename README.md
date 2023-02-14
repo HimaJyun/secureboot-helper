@@ -19,7 +19,7 @@
     6. `nano /target/etc/fstab` (fix root partition UUID)
     7. `dd if=/dev/zero of=/target/swap.img bs=$(stat -c %s /target/swap.img) count=1 conv=sync && mkswap /target/swap.img`
     8. delete temporary partition.
-8. ``mount /dev/<boot> /target/boot && mount /dev/<EFI> /target/boot/efi && mount -t proc none /target/proc && mount -o bind /sys /target/sys && mount -o bind /dev /target/dev && mount -o bind /dev/pts /target/dev/pts`
+8. `mount /dev/<boot> /target/boot && mount /dev/<EFI> /target/boot/efi && mount -t proc none /target/proc && mount -o bind /sys /target/sys && mount -o bind /dev /target/dev && mount -o bind /dev/pts /target/dev/pts`
 9. chroot /target
 10. `update-initramfs -u && update-grub`
 11. reboot
