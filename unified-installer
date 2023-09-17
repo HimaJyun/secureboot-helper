@@ -218,7 +218,7 @@ mkdir -p /etc/initramfs/post-update.d #/etc/kernel/postinst.d
 file_from "hook/sign-kernel" "/etc/initramfs/post-update.d/sign-kernel" "700"
 
 # 初回生成
-./secureboot-update ./secureboot.conf /boot/vmlinuz /boot/initrd.img
+./secureboot-update ./secureboot.conf "/boot/vmlinuz-$(uname -r)" "/boot/initrd.img-$(uname -r)"
 
 : "register stub update watch service" && $stub_update && {
     file_from "hook/stub-update.path" "/etc/systemd/system/stub-update.path"

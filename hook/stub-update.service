@@ -3,4 +3,4 @@ Description=Secure boot Unified kernel updater
 
 [Service]
 Type=oneshot
-ExecStart=/etc/secureboot/secureboot-update /etc/secureboot/secureboot.conf /boot/vmlinuz /boot/initrd.img
+ExecStart=/bin/sh -c "/etc/secureboot/secureboot-update /etc/secureboot/secureboot.conf /boot/vmlinuz-`uname -r` /boot/initrd.img-`uname -r`"
