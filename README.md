@@ -35,10 +35,11 @@
     1. `sudo umount /boot{/efi,/}`
     2. `sudo mount /dev/<boot> /mnt`
     3. `sudo rsync -aAXH --numeric-ids --info=progress2 /mnt/ /boot/`
-    4. `sudo nano /etc/fstab` (delete boot partition entry)
-    5. `sudo gdisk /dev/<device>` (delete boot partition and expand root partition)
-    6. `sudo reboot` (can't use `partprobe` for root expand)
-    7. `sudo xfs_growfs /`
+    4. `sudo umount /mnt`
+    5. `sudo nano /etc/fstab` (delete boot partition entry)
+    6. `sudo gdisk /dev/<device>` (delete boot partition and expand root partition)
+    7. `sudo reboot` (can't use `partprobe` for root expand)
+    8. `sudo xfs_growfs /`
 
 [^1]: It is workaround, current version Ubuntu installer doesn't support installing to LUKS partitions.
 

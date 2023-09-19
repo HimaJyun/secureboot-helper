@@ -37,7 +37,7 @@ done
 : "dropbear" && {
     apt install -y "dropbear-initramfs"
     if $config;then
-      sed -i "s/^#DROPBEAR_OPTIONS=/DROPBEAR_OPTIONS=\"-I 180 -p ${port} -j -k -s\"/" /etc/dropbear/initramfs/dropbear.conf
+      sed -i "/^#DROPBEAR_OPTIONS=/c DROPBEAR_OPTIONS=\"-I 180 -p ${port} -j -k -s\"" /etc/dropbear/initramfs/dropbear.conf
     fi
 }
 
