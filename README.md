@@ -1,6 +1,20 @@
+WARNING: WIP, beta, testing, researching, incomplete documentation, ...and other all.  
+contains a risk of break the bootloader.
+
+# secureboot-helper
+some scripts for own-keys secure boot, LUKS full disk encryption, TPM auto unlock, over SSH manually unlock.  
+BitLocker-like FDE for Linux servers, auto rebootable for auto updates, data protection from theft, anti mischief.
+
+WARNING: 3-letter government agency maybe able unlock your device.  
+It is intended to protect against theft and attacks by ordinary citizens.  
+may not be possible to protect against forensic technology or equipment.  (eg: cold boot attack, DMA attack)  
+Don't keeping sensitive data in plain text on **any** servers.  
+these data must be encrypted on a secure local device before being upload to the server, and keeping password to your brain.
 
 # Usage 
 ## Ubuntu 22.04 Server
+LUKS without LVM.
+
 1. `Enther shell` from `Help` menu. (over SSH recommended)
 2. clone and enter this git repository.
 3. `./fde-partition -l -r -10G /dev/<device>` (`-r -10G` for temporary partition, sizes is depend to additional software)
@@ -39,9 +53,42 @@
     5. `sudo nano /etc/fstab` (delete boot partition entry)
     6. `sudo gdisk /dev/<device>` (delete boot partition and expand root partition)
     7. `sudo reboot` (can't use `partprobe` for root expand)
-    8. `sudo xfs_growfs /`
+    8. `sudo xfs_growfs /` or 
+
+Hint: keep grub. If disable it, automatic updates may re-enable it in a higher boot order. In that case, manual operation is required. (now researching to uninstall grub)
 
 [^1]: It is workaround, current version Ubuntu installer doesn't support installing to LUKS partitions.
+
+## Debian
+Installing Debian to crypt partion. Debian installer supports it.  
+Partitioning example:
+- 500MiB: ESP
+- any size: LUKS root
+- 1GB: /boot (delete after, recommended to make it as the last partition)
+
+0. `sed -i -e "s/^deb cdrom/#deb cdrom/" /etc/apt/sources.list && apt update`
+1. `apt install git systemd-boot-efi curl rsync gdisk`
+2. Same as from step 12 on Ubuntu.
+3. adjust `/etc/kernel/cmdline` like as `root=/dev/mapper/root ro panic=0`
+
+Hint: Debian is easy to uninstall grub.
+
+```
+apt purge grub-common
+apt autoremove
+rm -rfv /boot/grub /boot/efi/EFI/debian
+```
+
+## Proxmox
+Install as Debian and convert to Proxmox.  
+follow official documentation: https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_12_Bookworm
+
+<!-- Not tried, Might be better than the conversion method.
+https://forum.proxmox.com/threads/adding-full-disk-encryption-to-proxmox.137051/
+-->
+
+Hint: Proxmox 8.1 needs to install proxmox-ve packages without rebooting.  
+if rebooted, it is stuck at "Loading initial ramdisk ...".
 
 <!-- TODO
 - rewrite shell's to python
