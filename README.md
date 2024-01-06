@@ -52,8 +52,8 @@ LUKS without LVM.
     4. `sudo umount /mnt`
     5. `sudo nano /etc/fstab` (delete boot partition entry)
     6. `sudo gdisk /dev/<device>` (delete boot partition and expand root partition)
-    7. `sudo reboot` (can't use `partprobe` for root expand)
-    8. `sudo xfs_growfs /` or 
+    7. `sudo systemctl reboot` (can't use `partprobe` for root expand)
+    8. grow root fs (eg: `sudo xfs_growfs /`)
 
 Hint: keep grub. If disable it, automatic updates may re-enable it in a higher boot order. In that case, manual operation is required. (now researching to uninstall grub)
 
